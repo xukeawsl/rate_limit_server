@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+option cc_generic_services = true;
+
+message RateLimitRequest {
+    string token = 1;
+}
+
+message RateLimitResponse {
+    bool allowed = 1;
+}
+
+service RateLimitService {
+    rpc CheckLimit(RateLimitRequest) returns (RateLimitResponse);
+}
