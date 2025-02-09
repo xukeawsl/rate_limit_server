@@ -17,6 +17,8 @@ FetchContent_MakeAvailable(simdjson)
 
 find_package(Protobuf REQUIRED)
 file(GLOB_RECURSE PROTO_FILES "${CMAKE_CURRENT_SOURCE_DIR}/proto/*.proto")
+
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/gen)
 execute_process(
     COMMAND protoc --cpp_out=${CMAKE_CURRENT_SOURCE_DIR}/gen --proto_path=${CMAKE_CURRENT_SOURCE_DIR}/proto ${PROTO_FILES}
 )
