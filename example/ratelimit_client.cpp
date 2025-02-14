@@ -5,7 +5,7 @@
 
 #include "ratelimit.pb.h"
 
-DEFINE_string(server, "127.0.0.1:50051", "RateLimit service address");
+DEFINE_string(server, "consul://ratelimit_service", "RateLimit service address");
 DEFINE_string(token, "test_token", "Token to be checked");
 DEFINE_int32(interval_ms, 500, "Interval in milliseconds");
 DEFINE_int32(count, 10, "Number of requests");
@@ -19,7 +19,7 @@ int main(int argc, char* argv[]) {
     for (int i = 0; i < FLAGS_threads; ++i) {
         threads.push_back(std::thread([]() {
             brpc::Channel channel;
-            if (channel.Init(FLAGS_server.c_str(), NULL) != 0) {
+            if (channel.Init(FLAGS_server.c_str(), "rr", NULL) != 0) {
                 LOG(ERROR) << "Fail to initialize channel";
                 return;
             }

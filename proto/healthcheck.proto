@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+option cc_generic_services = true;
+
+message HttpRequest {};
+
+message HttpResponse {};
+
+service HealthCheckService {
+    rpc HealthCheck(HttpRequest) returns (HttpResponse);
+};

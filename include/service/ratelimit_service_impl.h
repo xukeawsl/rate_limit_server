@@ -18,6 +18,8 @@ public:
                     ::RateLimitResponse* response,
                     ::google::protobuf::Closure* done) override;
 
+    std::string service_id() const { return _service_id; }
+
 private:
     static void onRedisCallComplete(brpc::Controller* redis_cntl,
                                    brpc::RedisResponse* redis_response,
@@ -28,5 +30,6 @@ private:
 private:
     brpc::Channel _redis_channel;
     std::string _lua_script_sha1;
+    std::string _service_id;
     ConfigManager _conf_manager;
 };

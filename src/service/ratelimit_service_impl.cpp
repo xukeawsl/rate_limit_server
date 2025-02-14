@@ -75,6 +75,38 @@ RateLimitServiceImpl::RateLimitServiceImpl(const std::string& limit_script)
         _lua_script_sha1 = resp.reply(0).data().as_string();
         LOG(INFO) << "Lua script loaded: " << _lua_script_sha1;
     }
+
+    {
+        brpc::Controller cnt;
+        brpc::RedisRequest req;
+        brpc::RedisResponse resp;
+
+        req.AddCommand("SETNX ratelimit_service_id 0");
+        _redis_channel.CallMethod(nullptr, &cnt, &req, &resp, nullptr);
+
+        if (cnt.Failed()) {
+            LOG(ERROR) << "Failed to set unique service ID: " << cnt.ErrorText();
+            throw std::runtime_error("Failed to set unique service ID");
+        }
+
+        cnt.Reset();
+        req.Clear();
+        req.AddCommand("INCR ratelimit_service_id");
+        _redis_channel.CallMethod(nullptr, &cnt, &req, &resp, nullptr);
+
+        if (cnt.Failed()) {
+            LOG(ERROR) << "Failed to increment unique service ID: " << cnt.ErrorText();
+            throw std::runtime_error("Failed to increment unique service ID");
+        }
+
+        if (resp.reply_size() == 0 || resp.reply(0).type() != brpc::REDIS_REPLY_INTEGER) {
+            LOG(ERROR) << "Invalid response from redis";
+            throw std::runtime_error("Invalid response from redis");
+        }
+
+        _service_id = "ratelimit_service_instance_" + std::to_string(resp.reply(0).integer());
+        LOG(INFO) << "Generated Service ID: " << _service_id;
+    }
 }
 
 void RateLimitServiceImpl::CheckLimit(::google::protobuf::RpcController* cntl_base,
