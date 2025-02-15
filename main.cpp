@@ -6,15 +6,16 @@
 
 DEFINE_int32(port, 50051, "RateLimit service port");
 DEFINE_int32(num_threads, 9, "Overall number of threads for the server");
-DEFINE_string(consul_health_check_path, "/healthcheck", "Consul health check path");
+DEFINE_string(consul_health_check_path, "/healthcheck",
+              "Consul health check path");
 
 namespace brpc {
 namespace policy {
 
 DECLARE_string(consul_agent_addr);
 
-}  // namespace policy
-} // namespace brpc
+}    // namespace policy
+}    // namespace brpc
 
 static bool RegisterToConsul(const std::string& service_id);
 static void DeregisterFromConsul(const std::string& service_id);
@@ -30,14 +31,16 @@ int main(int argc, char* argv[]) {
     brpc::Server server;
 
     HealthCheckServiceImpl health_check_service;
-    if (server.AddService(&health_check_service, brpc::SERVER_DOESNT_OWN_SERVICE,
+    if (server.AddService(&health_check_service,
+                          brpc::SERVER_DOESNT_OWN_SERVICE,
                           FLAGS_consul_health_check_path + " => HealthCheck")) {
         LOG(ERROR) << "Failed to add HealthCheck service";
         return -1;
     }
 
     RateLimitServiceImpl rate_limit_service("../conf/ratelimit.lua");
-    if (server.AddService(&rate_limit_service, brpc::SERVER_DOESNT_OWN_SERVICE) != 0) {
+    if (server.AddService(&rate_limit_service,
+                          brpc::SERVER_DOESNT_OWN_SERVICE) != 0) {
         LOG(ERROR) << "Failed to add RateLimit service";
         return -1;
     }
@@ -63,25 +66,28 @@ bool RegisterToConsul(const std::string& service_id) {
     brpc::ChannelOptions options;
     options.protocol = brpc::PROTOCOL_HTTP;
 
-    if (consul_channel.Init(brpc::policy::FLAGS_consul_agent_addr.c_str(), &options) != 0) {
+    if (consul_channel.Init(brpc::policy::FLAGS_consul_agent_addr.c_str(),
+                            &options) != 0) {
         LOG(ERROR) << "Failed to initialize Consul HTTP channel";
         return false;
     }
 
-    // 构造 HTTP 请求
     brpc::Controller cntl;
     cntl.http_request().uri() = "/v1/agent/service/register";
     cntl.http_request().set_method(brpc::HTTP_METHOD_PUT);
     cntl.http_request().set_content_type("application/json");
 
-    // 构建 JSON 请求体（手动构造或使用 JSON 库）
     std::string json_body = R"({
         "Name": "ratelimit_service",
-        "ID": ")" + service_id + R"(",
+        "ID": ")" + service_id +
+                            R"(",
         "Address": "127.0.0.1",
-        "Port": )" + std::to_string(FLAGS_port) + R"(,
+        "Port": )" + std::to_string(FLAGS_port) +
+                            R"(,
         "Check": {
-            "HTTP": "http://127.0.0.1:)" + std::to_string(FLAGS_port) + FLAGS_consul_health_check_path + R"(",
+            "HTTP": "http://127.0.0.1:)" +
+                            std::to_string(FLAGS_port) +
+                            FLAGS_consul_health_check_path + R"(",
             "Interval": "10s",
             "Timeout": "1s"
         }
@@ -89,18 +95,16 @@ bool RegisterToConsul(const std::string& service_id) {
 
     cntl.request_attachment().append(json_body);
 
-    // 发送请求
     consul_channel.CallMethod(nullptr, &cntl, nullptr, nullptr, nullptr);
     if (cntl.Failed()) {
         LOG(ERROR) << "Consul registration failed: " << cntl.ErrorText();
         return false;
     }
 
-    // 检查 HTTP 状态码（Consul 成功注册返回 200）
     if (cntl.http_response().status_code() != brpc::HTTP_STATUS_OK) {
-        LOG(ERROR) << "Consul registration rejected, code=" 
-                  << cntl.http_response().status_code()
-                  << ", body=" << cntl.response_attachment().to_string();
+        LOG(ERROR) << "Consul registration rejected, code="
+                   << cntl.http_response().status_code()
+                   << ", body=" << cntl.response_attachment().to_string();
         return false;
     }
 
@@ -113,7 +117,8 @@ void DeregisterFromConsul(const std::string& service_id) {
     brpc::ChannelOptions options;
     options.protocol = brpc::PROTOCOL_HTTP;
 
-    if (consul_channel.Init(brpc::policy::FLAGS_consul_agent_addr.c_str(), &options) != 0) {
+    if (consul_channel.Init(brpc::policy::FLAGS_consul_agent_addr.c_str(),
+                            &options) != 0) {
         LOG(ERROR) << "Failed to initialize Consul HTTP channel";
         return;
     }
@@ -126,8 +131,8 @@ void DeregisterFromConsul(const std::string& service_id) {
     if (cntl.Failed()) {
         LOG(ERROR) << "Consul deregistration failed: " << cntl.ErrorText();
     } else if (cntl.http_response().status_code() != brpc::HTTP_STATUS_OK) {
-        LOG(ERROR) << "Consul deregistration rejected, code=" 
-                  << cntl.http_response().status_code();
+        LOG(ERROR) << "Consul deregistration rejected, code="
+                   << cntl.http_response().status_code();
     } else {
         LOG(INFO) << "Service deregistered from Consul";
     }

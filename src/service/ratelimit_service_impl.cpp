@@ -3,13 +3,13 @@
 #include <fstream>
 
 DEFINE_string(etcd_address, "127.0.0.1:2379", "Etcd server address");
-DEFINE_string(limit_conf_prefix, "conf/ratelimit/", "RateLimiter config prefix");
+DEFINE_string(limit_conf_prefix, "conf/ratelimit/",
+              "RateLimiter config prefix");
 DEFINE_string(redis_address, "127.0.0.1:6379", "Redis server address");
 DEFINE_string(redis_password, "", "Redis server password");
 
 RateLimitServiceImpl::RateLimitServiceImpl(const std::string& limit_script)
-    : _conf_manager(FLAGS_etcd_address, FLAGS_limit_conf_prefix)
-{
+    : _conf_manager(FLAGS_etcd_address, FLAGS_limit_conf_prefix) {
     brpc::ChannelOptions options;
     options.protocol = brpc::PROTOCOL_REDIS;
     options.max_retry = 3;
@@ -33,13 +33,15 @@ RateLimitServiceImpl::RateLimitServiceImpl(const std::string& limit_script)
             throw std::runtime_error("Failed to authenticate redis");
         }
 
-        if (resp.reply_size() == 0 || resp.reply(0).type() != brpc::REDIS_REPLY_STATUS) {
+        if (resp.reply_size() == 0 ||
+            resp.reply(0).type() != brpc::REDIS_REPLY_STATUS) {
             LOG(ERROR) << "Invalid response from redis";
             throw std::runtime_error("Invalid response from redis");
         }
 
         if (resp.reply(0).data() != "OK") {
-            LOG(ERROR) << "Failed to authenticate redis: " << resp.reply(0).data();
+            LOG(ERROR) << "Failed to authenticate redis: "
+                       << resp.reply(0).data();
             throw std::runtime_error("Failed to authenticate redis");
         }
     }
@@ -67,7 +69,8 @@ RateLimitServiceImpl::RateLimitServiceImpl(const std::string& limit_script)
             exit(EXIT_FAILURE);
         }
 
-        if (resp.reply_size() == 0 || resp.reply(0).type() != brpc::REDIS_REPLY_STRING) {
+        if (resp.reply_size() == 0 ||
+            resp.reply(0).type() != brpc::REDIS_REPLY_STRING) {
             LOG(ERROR) << "Invalid response from redis";
             exit(EXIT_FAILURE);
         }
@@ -85,7 +88,8 @@ RateLimitServiceImpl::RateLimitServiceImpl(const std::string& limit_script)
         _redis_channel.CallMethod(nullptr, &cnt, &req, &resp, nullptr);
 
         if (cnt.Failed()) {
-            LOG(ERROR) << "Failed to set unique service ID: " << cnt.ErrorText();
+            LOG(ERROR) << "Failed to set unique service ID: "
+                       << cnt.ErrorText();
             throw std::runtime_error("Failed to set unique service ID");
         }
 
@@ -95,26 +99,29 @@ RateLimitServiceImpl::RateLimitServiceImpl(const std::string& limit_script)
         _redis_channel.CallMethod(nullptr, &cnt, &req, &resp, nullptr);
 
         if (cnt.Failed()) {
-            LOG(ERROR) << "Failed to increment unique service ID: " << cnt.ErrorText();
+            LOG(ERROR) << "Failed to increment unique service ID: "
+                       << cnt.ErrorText();
             throw std::runtime_error("Failed to increment unique service ID");
         }
 
-        if (resp.reply_size() == 0 || resp.reply(0).type() != brpc::REDIS_REPLY_INTEGER) {
+        if (resp.reply_size() == 0 ||
+            resp.reply(0).type() != brpc::REDIS_REPLY_INTEGER) {
             LOG(ERROR) << "Invalid response from redis";
             throw std::runtime_error("Invalid response from redis");
         }
 
-        _service_id = "ratelimit_service_instance_" + std::to_string(resp.reply(0).integer());
+        _service_id = "ratelimit_service_instance_" +
+                      std::to_string(resp.reply(0).integer());
         LOG(INFO) << "Generated Service ID: " << _service_id;
     }
 }
 
-void RateLimitServiceImpl::CheckLimit(::google::protobuf::RpcController* cntl_base,
-                                      const ::RateLimitRequest* request,
-                                      ::RateLimitResponse* response,
-                                      ::google::protobuf::Closure* done) {
+void RateLimitServiceImpl::CheckLimit(
+    ::google::protobuf::RpcController* cntl_base,
+    const ::RateLimitRequest* request, ::RateLimitResponse* response,
+    ::google::protobuf::Closure* done) {
     brpc::ClosureGuard done_guard(done);
-    
+
     brpc::Controller* cntl = static_cast<brpc::Controller*>(cntl_base);
 
     brpc::Controller* redis_cntl = new brpc::Controller;
@@ -129,29 +136,21 @@ void RateLimitServiceImpl::CheckLimit(::google::protobuf::RpcController* cntl_ba
     }
 
     brpc::RedisRequest redis_req;
-    redis_req.AddCommand(
-        "EVALSHA %s 1 %s %lld %lld",
-        _lua_script_sha1.c_str(),
-        token.c_str(),
-        config.burst,
-        config.rate
-    );
+    redis_req.AddCommand("EVALSHA %s 1 %s %lld %lld", _lua_script_sha1.c_str(),
+                         token.c_str(), config.burst, config.rate);
 
-    auto callback = brpc::NewCallback(&RateLimitServiceImpl::onRedisCallComplete,
-                                      redis_cntl,
-                                      redis_resp,
-                                      cntl,
-                                      response,
-                                      done_guard.release());
-    
-    _redis_channel.CallMethod(nullptr, redis_cntl, &redis_req, redis_resp, callback);
+    auto callback = brpc::NewCallback(
+        &RateLimitServiceImpl::onRedisCallComplete, redis_cntl, redis_resp,
+        cntl, response, done_guard.release());
+
+    _redis_channel.CallMethod(nullptr, redis_cntl, &redis_req, redis_resp,
+                              callback);
 }
 
-void RateLimitServiceImpl::onRedisCallComplete(brpc::Controller* redis_cntl,
-                                              brpc::RedisResponse* redis_response,
-                                              brpc::Controller* cntl,
-                                              ::RateLimitResponse* response,
-                                              ::google::protobuf::Closure* done) {
+void RateLimitServiceImpl::onRedisCallComplete(
+    brpc::Controller* redis_cntl, brpc::RedisResponse* redis_response,
+    brpc::Controller* cntl, ::RateLimitResponse* response,
+    ::google::protobuf::Closure* done) {
     std::unique_ptr<brpc::Controller> redis_cntl_guard(redis_cntl);
     std::unique_ptr<brpc::RedisResponse> redis_resp_guard(redis_response);
     brpc::ClosureGuard done_guard(done);

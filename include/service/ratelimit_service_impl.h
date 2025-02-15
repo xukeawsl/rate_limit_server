@@ -1,12 +1,12 @@
 #pragma once
 
-#include <brpc/redis.h>
-#include <brpc/channel.h>
 #include <brpc/callback.h>
+#include <brpc/channel.h>
+#include <brpc/redis.h>
 #include <gflags/gflags.h>
 
-#include "ratelimit.pb.h"
 #include "conf/config_manager.h"
+#include "ratelimit.pb.h"
 
 class RateLimitServiceImpl : public RateLimitService {
 public:
@@ -22,10 +22,10 @@ public:
 
 private:
     static void onRedisCallComplete(brpc::Controller* redis_cntl,
-                                   brpc::RedisResponse* redis_response,
-                                   brpc::Controller* cntl,
-                                   ::RateLimitResponse* response,
-                                   ::google::protobuf::Closure* done);
+                                    brpc::RedisResponse* redis_response,
+                                    brpc::Controller* cntl,
+                                    ::RateLimitResponse* response,
+                                    ::google::protobuf::Closure* done);
 
 private:
     brpc::Channel _redis_channel;

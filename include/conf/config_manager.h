@@ -12,10 +12,12 @@ struct TokenBucketConfig {
 
 class ConfigManager {
 public:
-    ConfigManager(const std::string& etcd_addr, const std::string& limit_conf_prefix);
+    ConfigManager(const std::string& etcd_addr,
+                  const std::string& limit_conf_prefix);
     ~ConfigManager() = default;
 
-    bool getTokenBucketConfig(const std::string& token, TokenBucketConfig& config);
+    bool getTokenBucketConfig(const std::string& token,
+                              TokenBucketConfig& config);
 
 private:
     using ConfigMap = std::unordered_map<std::string, TokenBucketConfig>;

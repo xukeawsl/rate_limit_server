@@ -1,15 +1,15 @@
 #include "service/healthcheck_service_impl.h"
 
-void HealthCheckServiceImpl::HealthCheck(google::protobuf::RpcController* cntl_base,
-                                         const HttpRequest*,
-                                         HttpResponse*,
-                                         google::protobuf::Closure* done) {
+void HealthCheckServiceImpl::HealthCheck(
+    google::protobuf::RpcController* cntl_base, const HttpRequest*,
+    HttpResponse*, google::protobuf::Closure* done) {
     brpc::ClosureGuard done_guard(done);
 
     brpc::Controller* cntl = static_cast<brpc::Controller*>(cntl_base);
 
-    cntl->set_after_rpc_resp_fn(std::bind(&HealthCheckServiceImpl::CallAfterHttp,
-        std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+    cntl->set_after_rpc_resp_fn(
+        std::bind(&HealthCheckServiceImpl::CallAfterHttp, std::placeholders::_1,
+                  std::placeholders::_2, std::placeholders::_3));
 
     cntl->response_attachment().append("OK");
     cntl->http_response().set_status_code(brpc::HTTP_STATUS_OK);

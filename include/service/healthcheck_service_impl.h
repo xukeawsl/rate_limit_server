@@ -11,8 +11,7 @@ public:
     virtual ~HealthCheckServiceImpl() = default;
 
     void HealthCheck(google::protobuf::RpcController* cntl_base,
-                     const HttpRequest*,
-                     HttpResponse*,
+                     const HttpRequest*, HttpResponse*,
                      google::protobuf::Closure* done) override;
 
 private:
