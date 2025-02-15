@@ -1,4 +1,4 @@
-#include "service/healthcheck_service.h"
+#include "service/healthcheck_service_impl.h"
 
 void HealthCheckServiceImpl::HealthCheck(google::protobuf::RpcController* cntl_base,
                                          const HttpRequest*,

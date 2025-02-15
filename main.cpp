@@ -1,7 +1,7 @@
 #include <brpc/server.h>
 #include <gflags/gflags.h>
 
-#include "service/healthcheck_service.h"
+#include "service/healthcheck_service_impl.h"
 #include "service/ratelimit_service_impl.h"
 
 DEFINE_int32(port, 50051, "RateLimit service port");
