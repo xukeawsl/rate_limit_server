@@ -1,5 +1,7 @@
 #pragma once
 
+#include <butil/containers/doubly_buffered_data.h>
+
 #include <atomic>
 #include <memory>
 #include <string>
@@ -28,8 +30,13 @@ private:
 
     void startPeriodicScan();
 
+    static bool Modify(ConfigMap& bg_map, const ConfigMap& new_map) {
+        bg_map = new_map;
+        return true;
+    }
+
 private:
     std::string _etcd_addr;
     std::string _limit_conf_prefix;
-    std::shared_ptr<ConfigMap> _configMap;
+    butil::DoublyBufferedData<ConfigMap> _configMap;
 };

@@ -11,10 +11,13 @@
 
 DEFINE_int32(scan_interval_seconds, 10, "Scan Etcd Ratelimit Config Interval");
 
+bvar::LatencyRecorder g_latency_load("config_map_load");
+bvar::LatencyRecorder g_latency_store("config_map_store");
+
 ConfigManager::ConfigManager(const std::string& etcd_addr,
                              const std::string& limit_conf_prefix)
     : _etcd_addr(etcd_addr), _limit_conf_prefix(limit_conf_prefix) {
-    std::atomic_store(&_configMap, std::make_shared<ConfigMap>());
+    _configMap.Modify(Modify, ConfigMap{});
 
     loadInitialConfig();
 
@@ -30,7 +33,7 @@ std::string ConfigManager::getPrefixRangeEnd(const std::string& prefix) {
 }
 
 void ConfigManager::loadInitialConfig() {
-    auto new_map = std::make_shared<ConfigMap>();
+    auto new_map = ConfigMap{};
 
     brpc::Channel channel;
     brpc::ChannelOptions options;
@@ -82,10 +85,14 @@ void ConfigManager::loadInitialConfig() {
             continue;
         }
 
-        new_map->emplace(token, config);
+        new_map.emplace(token, config);
     }
 
-    std::atomic_store(&_configMap, new_map);
+    butil::Timer timer;
+    timer.start();
+    _configMap.Modify(Modify, new_map);
+    timer.stop();
+    g_latency_store << timer.n_elapsed();
 }
 
 void ConfigManager::startPeriodicScan() {
@@ -100,7 +107,15 @@ void ConfigManager::startPeriodicScan() {
 
 bool ConfigManager::getTokenBucketConfig(const std::string& token,
                                          TokenBucketConfig& config) {
-    std::shared_ptr<ConfigMap> currentMap = std::atomic_load(&_configMap);
+    butil::Timer timer;
+    timer.start();
+    butil::DoublyBufferedData<ConfigMap>::ScopedPtr currentMap;
+    if (_configMap.Read(&currentMap)) {
+        LOG(ERROR) << "Failed to Read configMap: " << token;
+        return false;
+    }
+    timer.stop();
+    g_latency_load << timer.n_elapsed();
     auto iter = currentMap->find(token);
     if (iter == currentMap->end()) {
         LOG(ERROR) << "Token not found: " << token;
