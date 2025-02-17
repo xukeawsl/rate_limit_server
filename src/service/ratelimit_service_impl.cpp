@@ -8,6 +8,9 @@ DEFINE_string(limit_conf_prefix, "conf/ratelimit/",
 DEFINE_string(redis_address, "127.0.0.1:6379", "Redis server address");
 DEFINE_string(redis_password, "", "Redis server password");
 
+bvar::LatencyRecorder g_latency_pass("limit_pass");
+bvar::LatencyRecorder g_latency_reject("limit_reject");
+
 RateLimitServiceImpl::RateLimitServiceImpl(const std::string& limit_script)
     : _conf_manager(FLAGS_etcd_address, FLAGS_limit_conf_prefix) {
     brpc::ChannelOptions options;
@@ -120,12 +123,10 @@ void RateLimitServiceImpl::CheckLimit(
     ::google::protobuf::RpcController* cntl_base,
     const ::RateLimitRequest* request, ::RateLimitResponse* response,
     ::google::protobuf::Closure* done) {
+    
     brpc::ClosureGuard done_guard(done);
 
     brpc::Controller* cntl = static_cast<brpc::Controller*>(cntl_base);
-
-    brpc::Controller* redis_cntl = new brpc::Controller;
-    brpc::RedisResponse* redis_resp = new brpc::RedisResponse;
 
     std::string token = request->token();
 
@@ -135,22 +136,29 @@ void RateLimitServiceImpl::CheckLimit(
         return;
     }
 
+    butil::Timer* timer = new butil::Timer;
+    brpc::Controller* redis_cntl = new brpc::Controller;
+    brpc::RedisResponse* redis_resp = new brpc::RedisResponse;
+
+    timer->start();
+
     brpc::RedisRequest redis_req;
     redis_req.AddCommand("EVALSHA %s 1 %s %lld %lld", _lua_script_sha1.c_str(),
                          token.c_str(), config.burst, config.rate);
 
     auto callback = brpc::NewCallback(
-        &RateLimitServiceImpl::onRedisCallComplete, redis_cntl, redis_resp,
+        &RateLimitServiceImpl::onRedisCallComplete, timer, redis_cntl, redis_resp,
         cntl, response, done_guard.release());
 
     _redis_channel.CallMethod(nullptr, redis_cntl, &redis_req, redis_resp,
                               callback);
 }
 
-void RateLimitServiceImpl::onRedisCallComplete(
+void RateLimitServiceImpl::onRedisCallComplete(butil::Timer* timer,
     brpc::Controller* redis_cntl, brpc::RedisResponse* redis_response,
     brpc::Controller* cntl, ::RateLimitResponse* response,
     ::google::protobuf::Closure* done) {
+    std::unique_ptr<butil::Timer> timer_guard(timer);
     std::unique_ptr<brpc::Controller> redis_cntl_guard(redis_cntl);
     std::unique_ptr<brpc::RedisResponse> redis_resp_guard(redis_response);
     brpc::ClosureGuard done_guard(done);
@@ -172,9 +180,13 @@ void RateLimitServiceImpl::onRedisCallComplete(
         return;
     }
 
+    timer->stop();
+
     if (reply.integer() == 0) {
         response->set_allowed(false);
+        g_latency_reject << timer->n_elapsed();
     } else {
         response->set_allowed(true);
+        g_latency_pass << timer->n_elapsed();
     }
 }
