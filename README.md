@@ -53,7 +53,76 @@ service RateLimitService {
 + ectd 存储 token 对应的配置的格式，为了可读性存储为 json 格式，使用 simdjson 库来解析配置，存储格式为 conf/ratelimit/<token>，可以根据前缀**周期扫描**所有 token 并更新配置（etcd 的 Watch 机制对于 C++ 来说不友好，service 名称和方法名相同，导致需要设置编译选项并且手动去掉 void 才能编译通过，而且 brpc 貌似不支持 grpc 的流式接口，而是自己的一套）
 + 是否提供熔断机制，如下游发生整体服务不可用的时候，使用默认的配置或者使用本地限流等策略（未实现）
 
+# 压测
+使用 brpc 自带的压测工具 rpc_press 进行压力测试，压测机器为 4 核的腾讯云服务器
+```bash
+./rpc_press -proto=proto/ratelimit.proto -method=RateLimitService.CheckLimit -server=127.0.0.1:50051 -input='{"token":"test_token"}' -qps=100
 
+# 100qps 压力下，平均耗时 202us
+[Latency]
+  avg            202 us
+  50%            188 us
+  70%            202 us
+  90%            250 us
+  95%            279 us
+  97%            308 us
+  99%            342 us
+  99.9%         1331 us
+  99.99%        1331 us
+  max           1331 us
+
+# 1000qps 压力下，平均耗时 167us
+[Latency]
+  avg            167 us
+  50%            162 us
+  70%            169 us
+  90%            182 us
+  95%            193 us
+  97%            213 us
+  99%            231 us
+  99.9%          817 us
+  99.99%        4022 us
+  max           4022 us
+
+# 10000qps 压力下，平均耗时 198us
+[Latency]
+  avg            198 us
+  50%            187 us
+  70%            204 us
+  90%            239 us
+  95%            259 us
+  97%            277 us
+  99%            345 us
+  99.9%         1669 us
+  99.99%        3019 us
+  max           3628 us
+
+# 自适应选项，qps 为 48000，平均耗时 1015us
+[Latency]
+  avg           1015 us
+  50%           1010 us
+  70%           1126 us
+  90%           1316 us
+  95%           1390 us
+  97%           1469 us
+  99%           1625 us
+  99.9%         3709 us
+  99.99%        7993 us
+  max           8608 us
+
+# 60000qps 压力下，平均耗时达到 20585us，整机 cpu 利用率达到 70 以上
+[Latency]
+  avg          20585 us
+  50%          10631 us
+  70%          18852 us
+  90%          46122 us
+  95%          63397 us
+  97%          72932 us
+  99%          83217 us
+  99.9%       109791 us
+  99.99%      112370 us
+  max         113365 us
+```
 
 # 相关
 

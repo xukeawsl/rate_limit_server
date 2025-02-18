@@ -3,3 +3,5 @@ build
 nohup.out
 gen/*
 default.etcd/
+rpc_data
+rpc_press
