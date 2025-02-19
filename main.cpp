@@ -5,7 +5,7 @@
 #include "service/ratelimit_service_impl.h"
 
 DEFINE_int32(port, 50051, "RateLimit service port");
-DEFINE_int32(num_threads, 9, "Overall number of threads for the server");
+DEFINE_int32(num_threads, 1, "Overall number of threads for the server");
 DEFINE_string(consul_health_check_path, "/healthcheck",
               "Consul health check path");
 
