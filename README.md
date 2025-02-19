@@ -22,7 +22,7 @@
 
 ```protobuf
 message RateLimitRequest {
-    string token = 1; // 
+    string token = 1;
 }
 
 message RateLimitResponse {
