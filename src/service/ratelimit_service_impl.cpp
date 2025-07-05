@@ -112,8 +112,8 @@ RateLimitServiceImpl::RateLimitServiceImpl(const std::string& limit_script)
             LOG(ERROR) << "Invalid response from redis";
             throw std::runtime_error("Invalid response from redis");
         }
-
-        _service_id = "ratelimit_service_instance_" +
+        
+        _service_id = "ratelimit_service_instance_" + std::to_string(butil::gettimeofday_ms()) + "_" +
                       std::to_string(resp.reply(0).integer());
         LOG(INFO) << "Generated Service ID: " << _service_id;
     }
