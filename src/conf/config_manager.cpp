@@ -14,14 +14,21 @@ DEFINE_int32(scan_interval_seconds, 10, "Scan Etcd Ratelimit Config Interval");
 bvar::LatencyRecorder g_latency_load("config_map_load");
 bvar::LatencyRecorder g_latency_store("config_map_store");
 
-ConfigManager::ConfigManager(const std::string& etcd_addr,
-                             const std::string& limit_conf_prefix)
-    : _etcd_addr(etcd_addr), _limit_conf_prefix(limit_conf_prefix) {
+bool ConfigManager::init(const std::string& etcd_addr,
+                         const std::string& limit_conf_prefix) {
+    _etcd_addr = etcd_addr;
+    _limit_conf_prefix = limit_conf_prefix;
+
     _configMap.Modify(Modify, ConfigMap{});
 
-    loadInitialConfig();
+    if (!loadInitialConfig()) {
+        LOG(ERROR) << "Failed to load initial config from etcd.";
+        return false;
+    }
 
     startPeriodicScan();
+
+    return true;
 }
 
 std::string ConfigManager::getPrefixRangeEnd(const std::string& prefix) {
@@ -32,7 +39,7 @@ std::string ConfigManager::getPrefixRangeEnd(const std::string& prefix) {
     return end;
 }
 
-void ConfigManager::loadInitialConfig() {
+bool ConfigManager::loadInitialConfig() {
     auto new_map = ConfigMap{};
 
     brpc::Channel channel;
@@ -40,7 +47,7 @@ void ConfigManager::loadInitialConfig() {
     options.protocol = "h2:grpc";
     if (channel.Init(_etcd_addr.c_str(), &options) != 0) {
         LOG(ERROR) << "Failed to initialize etcd channel.";
-        throw std::runtime_error("Failed to initialize etcd channel.");
+        return false;
     }
 
     etcdserverpb::RangeRequest range_request;
@@ -54,8 +61,7 @@ void ConfigManager::loadInitialConfig() {
     etcd_stub.Range(&cntl, &range_request, &range_response, nullptr);
     if (cntl.Failed()) {
         LOG(ERROR) << "Fail to get range from etcd: " << cntl.ErrorText();
-        throw std::runtime_error("Fail to get range from etcd: " +
-                                 cntl.ErrorText());
+        return false;
     }
 
     for (int i = 0; i < range_response.kvs_size(); ++i) {
@@ -93,6 +99,8 @@ void ConfigManager::loadInitialConfig() {
     _configMap.Modify(Modify, new_map);
     timer.stop();
     g_latency_store << timer.n_elapsed();
+
+    return true;
 }
 
 void ConfigManager::startPeriodicScan() {

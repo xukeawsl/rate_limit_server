@@ -21,16 +21,19 @@ public:
     std::string service_id() const { return _service_id; }
 
 private:
-    static void onRedisCallComplete(butil::Timer* timer,
+    static bool initRedisChannel(brpc::Channel& channel);
+
+    static void onRedisCallComplete(std::string token, butil::Timer* timer,
                                     brpc::Controller* redis_cntl,
                                     brpc::RedisResponse* redis_response,
                                     brpc::Controller* cntl,
                                     ::RateLimitResponse* response,
-                                    ::google::protobuf::Closure* done);
+                                    ::google::protobuf::Closure* done,
+                                    brpc::Channel* redis_channel);
 
 private:
     brpc::Channel _redis_channel;
+    static std::string _s_lua_script;
     std::string _lua_script_sha1;
     std::string _service_id;
-    ConfigManager _conf_manager;
 };

@@ -11,8 +11,15 @@ DEFINE_string(redis_password, "", "Redis server password");
 bvar::LatencyRecorder g_latency_pass("limit_pass");
 bvar::LatencyRecorder g_latency_reject("limit_reject");
 
-RateLimitServiceImpl::RateLimitServiceImpl(const std::string& limit_script)
-    : _conf_manager(FLAGS_etcd_address, FLAGS_limit_conf_prefix) {
+std::string RateLimitServiceImpl::_s_lua_script = "";
+
+RateLimitServiceImpl::RateLimitServiceImpl(const std::string& limit_script) {
+
+    if (!ConfigManager::instance().init(FLAGS_etcd_address, FLAGS_limit_conf_prefix)) {
+        LOG(ERROR) << "Failed to initialize ConfigManager";
+        throw std::runtime_error("Failed to initialize ConfigManager");
+    }
+    
     brpc::ChannelOptions options;
     options.protocol = brpc::PROTOCOL_REDIS;
     options.max_retry = 3;
@@ -23,30 +30,9 @@ RateLimitServiceImpl::RateLimitServiceImpl(const std::string& limit_script)
         throw std::runtime_error("Fail to initialize redis channel");
     }
 
-    if (!FLAGS_redis_password.empty()) {
-        brpc::Controller cnt;
-        brpc::RedisRequest req;
-        brpc::RedisResponse resp;
-
-        req.AddCommand("AUTH " + FLAGS_redis_password);
-        _redis_channel.CallMethod(nullptr, &cnt, &req, &resp, nullptr);
-
-        if (cnt.Failed()) {
-            LOG(ERROR) << "Failed to authenticate redis: " << cnt.ErrorText();
-            throw std::runtime_error("Failed to authenticate redis");
-        }
-
-        if (resp.reply_size() == 0 ||
-            resp.reply(0).type() != brpc::REDIS_REPLY_STATUS) {
-            LOG(ERROR) << "Invalid response from redis";
-            throw std::runtime_error("Invalid response from redis");
-        }
-
-        if (resp.reply(0).data() != "OK") {
-            LOG(ERROR) << "Failed to authenticate redis: "
-                       << resp.reply(0).data();
-            throw std::runtime_error("Failed to authenticate redis");
-        }
+    if (!initRedisChannel(_redis_channel)) {
+        LOG(ERROR) << "Failed to initialize Redis channel";
+        throw std::runtime_error("Failed to initialize Redis channel");
     }
 
     std::ifstream ifs(limit_script, std::ios::in | std::ios::binary);
@@ -57,14 +43,14 @@ RateLimitServiceImpl::RateLimitServiceImpl(const std::string& limit_script)
 
     std::ostringstream oss;
     oss << ifs.rdbuf();
-    std::string lua_script = oss.str();
+    _s_lua_script = oss.str();
 
     {
         brpc::Controller cnt;
         brpc::RedisRequest req;
         brpc::RedisResponse resp;
 
-        req.AddCommand("SCRIPT LOAD %b", lua_script.data(), lua_script.size());
+        req.AddCommand("SCRIPT LOAD %b", _s_lua_script.data(), _s_lua_script.size());
         _redis_channel.CallMethod(nullptr, &cnt, &req, &resp, nullptr);
 
         if (cnt.Failed()) {
@@ -131,7 +117,7 @@ void RateLimitServiceImpl::CheckLimit(
     std::string token = request->token();
 
     TokenBucketConfig config;
-    if (!_conf_manager.getTokenBucketConfig(token, config)) {
+    if (!ConfigManager::instance().getTokenBucketConfig(token, config)) {
         cntl_base->SetFailed("Token config not found in etcd: " + token);
         return;
     }
@@ -147,17 +133,57 @@ void RateLimitServiceImpl::CheckLimit(
                          token.c_str(), config.burst, config.rate);
 
     auto callback = brpc::NewCallback(
-        &RateLimitServiceImpl::onRedisCallComplete, timer, redis_cntl, redis_resp,
-        cntl, response, done_guard.release());
+        &RateLimitServiceImpl::onRedisCallComplete, token, timer, redis_cntl, redis_resp,
+        cntl, response, done_guard.release(), &_redis_channel);
 
     _redis_channel.CallMethod(nullptr, redis_cntl, &redis_req, redis_resp,
                               callback);
 }
 
-void RateLimitServiceImpl::onRedisCallComplete(butil::Timer* timer,
+bool RateLimitServiceImpl::initRedisChannel(brpc::Channel& channel) {
+    brpc::ChannelOptions options;
+    options.protocol = brpc::PROTOCOL_REDIS;
+    options.max_retry = 3;
+    options.connect_timeout_ms = 500;
+
+    if (channel.Init(FLAGS_redis_address.c_str(), &options) != 0) {
+        LOG(ERROR) << "Fail to initialize redis channel";
+        throw std::runtime_error("Fail to initialize redis channel");
+    }
+
+    if (!FLAGS_redis_password.empty()) {
+        brpc::Controller cnt;
+        brpc::RedisRequest req;
+        brpc::RedisResponse resp;
+
+        req.AddCommand("AUTH " + FLAGS_redis_password);
+        channel.CallMethod(nullptr, &cnt, &req, &resp, nullptr);
+
+        if (cnt.Failed()) {
+            LOG(ERROR) << "Failed to authenticate redis: " << cnt.ErrorText();
+            return false;
+        }
+
+        if (resp.reply_size() == 0 ||
+            resp.reply(0).type() != brpc::REDIS_REPLY_STATUS) {
+            LOG(ERROR) << "Invalid response from redis";
+            return false;
+        }
+
+        if (resp.reply(0).data() != "OK") {
+            LOG(ERROR) << "Failed to authenticate redis: "
+                       << resp.reply(0).data();
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void RateLimitServiceImpl::onRedisCallComplete(std::string token, butil::Timer* timer,
     brpc::Controller* redis_cntl, brpc::RedisResponse* redis_response,
     brpc::Controller* cntl, ::RateLimitResponse* response,
-    ::google::protobuf::Closure* done) {
+    ::google::protobuf::Closure* done, brpc::Channel* redis_channel) {
     std::unique_ptr<butil::Timer> timer_guard(timer);
     std::unique_ptr<brpc::Controller> redis_cntl_guard(redis_cntl);
     std::unique_ptr<brpc::RedisResponse> redis_resp_guard(redis_response);
@@ -169,20 +195,56 @@ void RateLimitServiceImpl::onRedisCallComplete(butil::Timer* timer,
     }
 
     if (redis_response->reply_size() == 0) {
-        cntl->SetFailed("Invalid response from redis");
+        cntl->SetFailed("Invalid response from redis test");
         return;
     }
 
-    const auto& reply = redis_response->reply(0);
+    if (redis_response->reply(0).is_error()) {
+        LOG(WARNING) << "Redis error: " << redis_response->reply(0).error_message();
 
-    if (reply.type() != brpc::REDIS_REPLY_INTEGER) {
+        redis_cntl->Reset();
+        redis_response->Clear();
+
+        TokenBucketConfig config;
+        if (!ConfigManager::instance().getTokenBucketConfig(token, config)) {
+            cntl->SetFailed("Token config not found in etcd: " + token);
+            return;
+        }
+
+        std::vector<butil::StringPiece> components;
+        components.emplace_back("EVAL");
+        components.emplace_back(_s_lua_script);
+        components.emplace_back("1");
+        components.emplace_back(token);
+        components.emplace_back(std::to_string(config.burst));
+        components.emplace_back(std::to_string(config.rate));
+
+        brpc::RedisRequest redis_req;
+        redis_req.AddCommandByComponents(components.data(), components.size());
+
+        redis_channel->CallMethod(
+            nullptr, redis_cntl, &redis_req, redis_response, nullptr);
+
+        if (redis_cntl->Failed()) {
+            cntl->SetFailed("Failed to call redis: " + redis_cntl->ErrorText());
+            return;
+        }
+
+        if (redis_response->reply_size() == 0 ||
+            redis_response->reply(0).is_error()) {
+            cntl->SetFailed("Invalid response from redis test2");
+            return;
+        }
+    }
+
+    if (redis_response->reply(0).type() != brpc::REDIS_REPLY_INTEGER) {
         cntl->SetFailed("Invalid response type from redis");
         return;
     }
 
     timer->stop();
 
-    if (reply.integer() == 0) {
+    if (redis_response->reply(0).integer() == 0) {
         response->set_allowed(false);
         g_latency_reject << timer->n_elapsed();
     } else {

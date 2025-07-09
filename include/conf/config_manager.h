@@ -14,19 +14,31 @@ struct TokenBucketConfig {
 
 class ConfigManager {
 public:
-    ConfigManager(const std::string& etcd_addr,
-                  const std::string& limit_conf_prefix);
-    ~ConfigManager() = default;
+    static ConfigManager& instance() {
+        static ConfigManager instance;
+        return instance;
+    }
+
+    ConfigManager(const ConfigManager&) = delete;
+    ConfigManager& operator=(const ConfigManager&) = delete;
+    ConfigManager(ConfigManager&&) = delete;
+    ConfigManager& operator=(ConfigManager&&) = delete;
+
+    bool init(const std::string& etcd_addr,
+              const std::string& limit_conf_prefix);
 
     bool getTokenBucketConfig(const std::string& token,
                               TokenBucketConfig& config);
 
 private:
+    ConfigManager() = default;
+    ~ConfigManager() = default;
+
     using ConfigMap = std::unordered_map<std::string, TokenBucketConfig>;
 
     std::string getPrefixRangeEnd(const std::string& prefix);
 
-    void loadInitialConfig();
+    bool loadInitialConfig();
 
     void startPeriodicScan();
 
