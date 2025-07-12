@@ -1,10 +1,8 @@
 local key = KEYS[1]
 local capacity = tonumber(ARGV[1])
 local rate = tonumber(ARGV[2])
-local key_ttl = tonumber(ARGV[3]) or 3600
-
-local time = redis.call('TIME')
-local now_ms = time[1] * 1000 + math.floor(time[2] / 1000)
+local now_ms = tonumber(ARGV[3])
+local key_ttl = tonumber(ARGV[4]) or 3600
 
 local bucket = redis.call('HMGET', key, 'tokens', 'last_refill_ms')
 local tokens = tonumber(bucket[1]) or capacity

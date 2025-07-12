@@ -13,6 +13,46 @@ bvar::LatencyRecorder g_latency_reject("limit_reject");
 
 std::string RateLimitServiceImpl::_s_lua_script = "";
 
+bool RateLimitServiceImpl::initRedisChannel(brpc::Channel& channel) {
+    brpc::ChannelOptions options;
+    options.protocol = brpc::PROTOCOL_REDIS;
+    options.max_retry = 3;
+    options.connect_timeout_ms = 500;
+
+    if (channel.Init(FLAGS_redis_address.c_str(), &options) != 0) {
+        LOG(ERROR) << "Fail to initialize redis channel";
+        throw std::runtime_error("Fail to initialize redis channel");
+    }
+
+    if (!FLAGS_redis_password.empty()) {
+        brpc::Controller cnt;
+        brpc::RedisRequest req;
+        brpc::RedisResponse resp;
+
+        req.AddCommand("AUTH " + FLAGS_redis_password);
+        channel.CallMethod(nullptr, &cnt, &req, &resp, nullptr);
+
+        if (cnt.Failed()) {
+            LOG(ERROR) << "Failed to authenticate redis: " << cnt.ErrorText();
+            return false;
+        }
+
+        if (resp.reply_size() == 0 ||
+            resp.reply(0).type() != brpc::REDIS_REPLY_STATUS) {
+            LOG(ERROR) << "Invalid response from redis";
+            return false;
+        }
+
+        if (resp.reply(0).data() != "OK") {
+            LOG(ERROR) << "Failed to authenticate redis: "
+                       << resp.reply(0).data();
+            return false;
+        }
+    }
+
+    return true;
+}
+
 RateLimitServiceImpl::RateLimitServiceImpl(const std::string& limit_script) {
 
     if (!ConfigManager::instance().init(FLAGS_etcd_address, FLAGS_limit_conf_prefix)) {
@@ -129,8 +169,8 @@ void RateLimitServiceImpl::CheckLimit(
     timer->start();
 
     brpc::RedisRequest redis_req;
-    redis_req.AddCommand("EVALSHA %s 1 %s %lld %lld", _lua_script_sha1.c_str(),
-                         token.c_str(), config.burst, config.rate);
+    redis_req.AddCommand("EVALSHA %s 1 %s %lld %lld %lld", _lua_script_sha1.c_str(),
+                         token.c_str(), config.burst, config.rate, butil::gettimeofday_ms());
 
     auto callback = brpc::NewCallback(
         &RateLimitServiceImpl::onRedisCallComplete, token, timer, redis_cntl, redis_resp,
@@ -138,46 +178,6 @@ void RateLimitServiceImpl::CheckLimit(
 
     _redis_channel.CallMethod(nullptr, redis_cntl, &redis_req, redis_resp,
                               callback);
-}
-
-bool RateLimitServiceImpl::initRedisChannel(brpc::Channel& channel) {
-    brpc::ChannelOptions options;
-    options.protocol = brpc::PROTOCOL_REDIS;
-    options.max_retry = 3;
-    options.connect_timeout_ms = 500;
-
-    if (channel.Init(FLAGS_redis_address.c_str(), &options) != 0) {
-        LOG(ERROR) << "Fail to initialize redis channel";
-        throw std::runtime_error("Fail to initialize redis channel");
-    }
-
-    if (!FLAGS_redis_password.empty()) {
-        brpc::Controller cnt;
-        brpc::RedisRequest req;
-        brpc::RedisResponse resp;
-
-        req.AddCommand("AUTH " + FLAGS_redis_password);
-        channel.CallMethod(nullptr, &cnt, &req, &resp, nullptr);
-
-        if (cnt.Failed()) {
-            LOG(ERROR) << "Failed to authenticate redis: " << cnt.ErrorText();
-            return false;
-        }
-
-        if (resp.reply_size() == 0 ||
-            resp.reply(0).type() != brpc::REDIS_REPLY_STATUS) {
-            LOG(ERROR) << "Invalid response from redis";
-            return false;
-        }
-
-        if (resp.reply(0).data() != "OK") {
-            LOG(ERROR) << "Failed to authenticate redis: "
-                       << resp.reply(0).data();
-            return false;
-        }
-    }
-
-    return true;
 }
 
 void RateLimitServiceImpl::onRedisCallComplete(std::string token, butil::Timer* timer,
@@ -218,6 +218,7 @@ void RateLimitServiceImpl::onRedisCallComplete(std::string token, butil::Timer* 
         components.emplace_back(token);
         components.emplace_back(std::to_string(config.burst));
         components.emplace_back(std::to_string(config.rate));
+        components.emplace_back(std::to_string(butil::gettimeofday_ms()));
 
         brpc::RedisRequest redis_req;
         redis_req.AddCommandByComponents(components.data(), components.size());
